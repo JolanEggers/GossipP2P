@@ -1,5 +1,3 @@
-# gossip_node.py
-
 import json
 import socket
 import threading
@@ -76,12 +74,23 @@ class GossipNode:
 
     def send_data_to_node(self, node_ip, node_port, topic_name, content):
         try:
+            # Using the 'with' statement ensures the socket is automatically closed
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((node_ip, node_port))
-                message = f"POST /{node_ip}:{node_port}/{topic_name} HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n{content}"
-                s.sendall(message.encode('utf-8'))
+                s.connect((node_ip, node_port))  # Connect to the node
+
+                # Append "END" to signal the end of the transmission
+                message = f"POST /{node_ip}:{node_port}/{topic_name} HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n{content}END238973"
+                s.sendall(message.encode('utf-8'))  # Send the message
+                
+                #print(f"Sent data to {node_ip}:{node_port} for topic {topic_name}")
+
+                # Ensure the socket is closed properly
+                s.shutdown(socket.SHUT_WR)  # Signal the end of the transmission
+                s.close()  # Explicitly close the socket
         except Exception as e:
-            self.remove_node(node_ip, node_port)
+            # Handle any connection issues or other errors
+            print(f"Error sending data to {node_ip}:{node_port}: {e}")
+            self.remove_node(node_ip, node_port)  # Remove the node from known nodes list if error occurs
 
     def publish(self, topic_name, content):
         for node in self.info["known_nodes"]:
@@ -95,38 +104,49 @@ class GossipNode:
                 callback(topic_name, content)
 
     def handle_client(self, client_socket):
-        try:
-            request = client_socket.recv(1024).decode('utf-8')
+            try:
+                request = b""
+                stayInLoop = True
+                while stayInLoop:
+                    chunk = client_socket.recv(1024)  # Receive 4096 bytes at a time
+                    if not chunk:
+                        stayInLoop = False
+                    request += chunk  # Append the received chunk to the message
+                    
+                    if b"END238973" in chunk:
+                        stayInLoop = False
+                request = request.replace(b"END238973", b"")
+                request = request.decode('utf-8')
 
-            if request.startswith("GET /info"):
-                request_json = json.loads(request.split("\r\n\r\n")[1])
-                node_ip = request_json.get("self", {}).get("IP")
-                node_port = request_json.get("self", {}).get("port")
-                subscribed_topics = request_json.get("self", {}).get("subscribed_topics", [])
+                if request.startswith("GET /info"):
+                    request_json = json.loads(request.split("\r\n\r\n")[1])
+                    node_ip = request_json.get("self", {}).get("IP")
+                    node_port = request_json.get("self", {}).get("port")
+                    subscribed_topics = request_json.get("self", {}).get("subscribed_topics", [])
 
-                self.add_known_node(node_ip, node_port, subscribed_topics)
-                response = self.get_info()
+                    self.add_known_node(node_ip, node_port, subscribed_topics)
+                    response = self.get_info()
 
-                client_socket.sendall(response.encode('utf-8'))
-            else:
-                try:
-                    topic_info = request.split(' ')[1].strip('/')
-                    ip_port, topic_name = topic_info.split('/')
+                    client_socket.sendall(response.encode('utf-8'))
+                else:
+                    try:
+                        topic_info = request.split(' ')[1].strip('/')
+                        ip_port, topic_name = topic_info.split('/')
 
-                    if topic_name in self.subscriptions:
-                        content = request.split("\r\n\r\n")[1]
-                        for callback in self.subscriptions[topic_name]:
-                            callback(topic_name, content)
+                        if topic_name in self.subscriptions:
+                            content = request.split("\r\n\r\n")[1]
+                            for callback in self.subscriptions[topic_name]:
+                                callback(topic_name, content)
 
-                    response = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
-                except Exception as e:
-                    response = "HTTP/1.1 404 Not Found\r\n\r\n"
+                        response = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+                    except Exception as e:
+                        response = "HTTP/1.1 404 Not Found\r\n\r\n"
 
-                client_socket.sendall(response.encode('utf-8'))
-        except Exception as e:
-            print(f"Error handling client: {e}")
-        finally:
-            client_socket.close()
+                    client_socket.sendall(response.encode('utf-8'))
+            except Exception as e:
+                print(f"Error handling client: {e}")
+            finally:
+                client_socket.close()
 
     def start(self):
         while True:
@@ -148,7 +168,7 @@ class GossipNode:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect((node_ip, node_port))
 
-                request = f"GET /info\r\n\r\n{json.dumps(self.info)}"
+                request = f"GET /info\r\n\r\n{json.dumps(self.info)}END238973"
                 s.sendall(request.encode('utf-8'))
 
                 response = s.recv(1024).decode('utf-8')
@@ -169,11 +189,3 @@ class GossipNode:
         except Exception as e:
             print(f"Error querying {node_ip}:{node_port}/info: {e}")
             self.remove_node(node_ip, node_port)
-
-
-def temperature(topic, content):
-    print(f"Received {topic} data: {content}")
-
-
-def humidity(topic, content):
-    print(f"Received {topic} data: {content}")
