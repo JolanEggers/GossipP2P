@@ -18,7 +18,7 @@ if __name__ == "__main__":
     #gossip_node.subscribe("Humidity", humidity)
 
     # Add known nodes with IP and Port, no topics for this example
-    gossip_node.add_known_node("192.168.178.67", 5000)
+    gossip_node.add_known_node("127.0.0.1", 5000)
 
     i = 0
     while True:
