@@ -11,7 +11,7 @@ def humidity(topic, content):
 
 
 if __name__ == "__main__":
-    gossip_node = GossipNode(host="192.168.178.67",port=5001)
+    gossip_node = GossipNode(host="127.0.0.1",port=5001)
 
     # Subscribe to topics
     gossip_node.subscribe("Temperature", temperature)
