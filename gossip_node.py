@@ -7,8 +7,9 @@ import random
 
 class GossipNode:
     def __init__(self, host='127.0.0.1', port=5000):
-        self.host = host
+        self.host = self.get_local_ip() if host == 'auto' else host
         self.port = port
+
 
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.bind((self.host, self.port))
@@ -28,6 +29,18 @@ class GossipNode:
         self.start_server_thread()
 
         threading.Thread(target=self.update_known_nodes_periodically, daemon=True).start()
+    
+    def get_local_ip(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # This IP doesn't need to be reachable
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+        except Exception:
+            ip = "127.0.0.1"
+        finally:
+            s.close()
+        return ip
 
     def start_server_thread(self):
         server_thread = threading.Thread(target=self.start)
