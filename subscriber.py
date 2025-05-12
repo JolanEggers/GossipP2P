@@ -1,5 +1,6 @@
 from gossip_node import GossipNode
 import time
+import socket
 
 
 def temperature(topic, content):
@@ -11,15 +12,8 @@ def humidity(topic, content):
 
 
 if __name__ == "__main__":
-    gossip_node = GossipNode(host="127.0.0.1",port=5001)
-
-    # Subscribe to topics
+    gossip_node = GossipNode(host='auto', port=5001)
     gossip_node.subscribe("Temperature", temperature)
-    #gossip_node.subscribe("Humidity", humidity)
 
-    # Add known nodes with IP and Port, no topics for this example
-    gossip_node.add_known_node("127.0.0.1", 5000)
-
-    i = 0
     while True:
         time.sleep(1)
