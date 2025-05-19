@@ -12,6 +12,7 @@ class GossipNode:
 
 
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.host, self.port))
         self.server_socket.listen(5)
 
@@ -87,23 +88,20 @@ class GossipNode:
 
     def send_data_to_node(self, node_ip, node_port, topic_name, content):
         try:
-            # Using the 'with' statement ensures the socket is automatically closed
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((node_ip, node_port))  # Connect to the node
+                s.settimeout(5)  # prevent hanging forever
+                s.connect((node_ip, node_port))
 
-                # Append "END" to signal the end of the transmission
                 message = f"POST /{node_ip}:{node_port}/{topic_name} HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n{content}END238973"
-                s.sendall(message.encode('utf-8'))  # Send the message
-                
-                #print(f"Sent data to {node_ip}:{node_port} for topic {topic_name}")
+                s.sendall(message.encode('utf-8'))
 
-                # Ensure the socket is closed properly
-                s.shutdown(socket.SHUT_WR)  # Signal the end of the transmission
-                s.close()  # Explicitly close the socket
+                s.shutdown(socket.SHUT_WR)
+        except socket.timeout:
+            print(f"Timeout sending to {node_ip}:{node_port}")
+            self.remove_node(node_ip, node_port)
         except Exception as e:
-            # Handle any connection issues or other errors
             print(f"Error sending data to {node_ip}:{node_port}: {e}")
-            self.remove_node(node_ip, node_port)  # Remove the node from known nodes list if error occurs
+            self.remove_node(node_ip, node_port)
 
     def publish(self, topic_name, content):
         for node in self.info["known_nodes"]:
@@ -168,7 +166,10 @@ class GossipNode:
             client_handler.start()
 
     def update_known_nodes_periodically(self):
+        #thread_id = threading.get_ident()
         while True:
+            #with open(f"/tmp/thread_{threading.get_ident()}.alive", "w") as f:
+            #    f.write(str(time.time()))
             if self.info["known_nodes"]:
                 random_node = random.choice(self.info["known_nodes"])
                 node_ip = random_node["IP"]
