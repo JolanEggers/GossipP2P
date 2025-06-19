@@ -13,10 +13,11 @@ class GossipNode:
         self.connection_pool = {}  # (ip, port): socket
         self.connection_lock = threading.Lock()
 
-
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind((self.host, self.port))
+
+        self.bind_with_retry(self.host, self.port)
+
         self.server_socket.listen(5)
 
         self.info = {
@@ -33,6 +34,17 @@ class GossipNode:
         self.start_server_thread()
 
         threading.Thread(target=self.update_known_nodes_periodically, daemon=True).start()
+
+    def bind_with_retry(self, host, port):
+        while True:
+            try:
+                self.server_socket.bind((host, port))
+                print(f"Successfully bound to {host}:{port}")
+                break
+            except OSError as e:
+                print(f"Failed to bind to {host}:{port} — {e}. Retrying in 5 seconds...")
+                time.sleep(5)
+
     
     def get_local_ip(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
