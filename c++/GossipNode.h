@@ -6,6 +6,7 @@
 #include <thread>
 #include <mutex>
 #include <functional>
+#include <atomic>
 #include <netinet/in.h>
 #include "json.hpp"
 
@@ -27,12 +28,19 @@ public:
     // Info for debugging
     std::string get_info_json() const;
 
+    // Shutdown method
+    void shutdown();
+
 private:
     // Node identity
     std::string host_;
     int port_;
     int server_fd_;
     std::thread server_thread_;
+    std::thread update_thread_;
+
+    // Shutdown flag
+    std::atomic<bool> shutdown_flag_;
 
     // JSON info structure (self & known_nodes)
     nlohmann::json info_;

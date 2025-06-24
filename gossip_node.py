@@ -26,7 +26,7 @@ class GossipNode:
                 "port": self.port,
                 "subscribed_topics": []
             },
-            "known_nodes": []
+            "known_nodes": {}  # Changed to dict: {(ip, port): {"subscribed_topics": []}}
         }
 
         self.subscriptions = {}
@@ -70,18 +70,19 @@ class GossipNode:
         if node_ip == self.host and node_port == self.port:
             return
 
-        for node in self.info["known_nodes"]:
-            if node["IP"] == node_ip and node["port"] == node_port:
-                for topic in subscribed_topics:
-                    if topic not in node["subscribed_topics"]:
-                        node["subscribed_topics"].append(topic)
-                return
-
-        self.info["known_nodes"].append({
-            "IP": node_ip,
-            "port": node_port,
-            "subscribed_topics": subscribed_topics
-        })
+        key = (node_ip, node_port)
+        if key in self.info["known_nodes"]:
+            # Update existing topics
+            existing_topics = self.info["known_nodes"][key]["subscribed_topics"]
+            for topic in subscribed_topics:
+                if topic not in existing_topics:
+                    existing_topics.append(topic)
+        else:
+            self.info["known_nodes"][key] = {
+                "IP": node_ip,
+                "port": node_port,
+                "subscribed_topics": subscribed_topics
+            }
 
     def get_info(self):
         info_json = json.dumps(self.info, indent=4)
@@ -96,10 +97,9 @@ class GossipNode:
             self.info["self"]["subscribed_topics"].append(topic_name)
 
     def remove_node(self, node_ip, node_port):
-        """Remove a node entirely from the known_nodes list."""
-        self.info["known_nodes"] = [
-            node for node in self.info["known_nodes"] if not (node["IP"] == node_ip and node["port"] == node_port)
-        ]
+        """Remove a node entirely from the known_nodes dict."""
+        key = (node_ip, node_port)
+        self.info["known_nodes"].pop(key, None)  # Safe removal, no error if key doesn't exist
 
     def send_data_to_node(self, node_ip, node_port, topic_name, content):
         key = (node_ip, node_port)
@@ -145,10 +145,8 @@ class GossipNode:
 
 
     def publish(self, topic_name, content):
-        for node in self.info["known_nodes"]:
-            if topic_name in node["subscribed_topics"]:
-                node_ip = node["IP"]
-                node_port = node["port"]
+        for (node_ip, node_port), node_data in self.info["known_nodes"].items():
+            if topic_name in node_data["subscribed_topics"]:
                 threading.Thread(target=self.send_data_to_node, args=(node_ip, node_port, topic_name, content)).start()
 
         if topic_name in self.subscriptions:
@@ -214,9 +212,8 @@ class GossipNode:
             #with open(f"/tmp/thread_{threading.get_ident()}.alive", "w") as f:
             #    f.write(str(time.time()))
             if self.info["known_nodes"]:
-                random_node = random.choice(self.info["known_nodes"])
-                node_ip = random_node["IP"]
-                node_port = random_node["port"]
+                random_key = random.choice(list(self.info["known_nodes"].keys()))
+                node_ip, node_port = random_key
                 self.query_node_for_info(node_ip, node_port)
             time.sleep(1)
 
@@ -237,7 +234,8 @@ class GossipNode:
                 self.add_known_node(node_ip, node_port, subscribed_topics)
 
                 for new_node in known_nodes:
-                    self.add_known_node(new_node["IP"], new_node["port"], new_node.get("subscribed_topics", []))
+                    if isinstance(new_node, dict) and "IP" in new_node and "port" in new_node:
+                        self.add_known_node(new_node["IP"], new_node["port"], new_node.get("subscribed_topics", []))
 
                 for topic in subscribed_topics:
                     if topic not in self.info["self"]["subscribed_topics"]:
