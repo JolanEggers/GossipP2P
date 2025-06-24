@@ -10,7 +10,7 @@
 using json = nlohmann::json;
 
 GossipNode::GossipNode(const std::string& host, int port)
-    : host_(host), port_(port) {
+    : host_(host), port_(port), shutdown_flag_(false) {
 
     // Ignore SIGPIPE globally
     static bool signal_handled = false;
@@ -28,20 +28,11 @@ GossipNode::GossipNode(const std::string& host, int port)
 
     bind_with_retry();
     server_thread_ = std::thread(&GossipNode::start_server, this);
-    std::thread(&GossipNode::update_known_nodes_periodically, this).detach();  // <<-- Add this
+    update_thread_ = std::thread(&GossipNode::update_known_nodes_periodically, this);
 }
 
 GossipNode::~GossipNode() {
-    close(server_fd_);
-    if (server_thread_.joinable()) {
-        server_thread_.join();
-    }
-
-    std::lock_guard<std::mutex> lock(conn_mutex_);
-    for (auto& [_, sock] : socket_pool_) {
-        close(sock);
-    }
-    socket_pool_.clear();
+    shutdown();
 }
 
 void GossipNode::bind_with_retry() {
@@ -64,12 +55,19 @@ void GossipNode::bind_with_retry() {
 }
 
 void GossipNode::start_server() {
-    while (true) {
+    while (!shutdown_flag_.load()) {
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
         int client_fd = accept(server_fd_, (sockaddr*)&client_addr, &client_len);
         if (client_fd >= 0) {
             std::thread(&GossipNode::handle_client, this, client_fd).detach();
+        } else {
+            // If accept fails (e.g., socket closed), break out of loop
+            if (shutdown_flag_.load()) {
+                break;
+            }
+            // Brief sleep to avoid busy waiting on persistent errors
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 }
@@ -233,7 +231,7 @@ void GossipNode::subscribe(const std::string& topic, std::function<void(const st
 }
 
 void GossipNode::update_known_nodes_periodically() {
-    while (true) {
+    while (!shutdown_flag_.load()) {
         {
             std::lock_guard<std::mutex> lock(conn_mutex_);
             if (!info_["known_nodes"].empty()) {
@@ -244,7 +242,11 @@ void GossipNode::update_known_nodes_periodically() {
                 query_node_for_info(ip, port);
             }
         }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        
+        // Sleep in smaller chunks to respond faster to shutdown
+        for (int i = 0; i < 10 && !shutdown_flag_.load(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 }
 void GossipNode::query_node_for_info(const std::string& ip, int port) {
@@ -293,4 +295,28 @@ void GossipNode::query_node_for_info(const std::string& ip, int port) {
 
 std::string GossipNode::get_info_json() const {
     return info_.dump(4);
+}
+
+void GossipNode::shutdown() {
+    // Set shutdown flag to stop all loops
+    shutdown_flag_.store(true);
+    
+    // Shutdown and close server socket to interrupt accept() calls
+    ::shutdown(server_fd_, SHUT_RDWR);
+    close(server_fd_);
+    
+    // Wait for threads to finish
+    if (server_thread_.joinable()) {
+        server_thread_.join();
+    }
+    if (update_thread_.joinable()) {
+        update_thread_.join();
+    }
+    
+    // Clean up socket pool
+    std::lock_guard<std::mutex> lock(conn_mutex_);
+    for (auto& [_, sock] : socket_pool_) {
+        close(sock);
+    }
+    socket_pool_.clear();
 }
